@@ -1,0 +1,274 @@
+---
+title: "Wiki gamification dataset study"
+author: "Jonathan Martin"
+date: "22 de marzo de 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+install.packages("httr")
+install.packages("xml2")
+install.packages("stringr")
+install.packages("rjson")
+install.packages("sets")
+install.packages("Hmisc")
+install.packages("ggplot2")
+install.packages("scales")
+install.packages("plotly")
+install.packages("anytime")
+install.packages("lubridate")
+install.packages("dplyr")
+install.packages("plyr")
+
+library(httr)
+library(xml2)
+library(stringr)
+library(rjson)
+library(sets)
+library(Hmisc)
+library(ggplot2)
+library(scales)
+library(plotly)
+library(anytime)
+library(lubridate)
+library(dplyr)
+library(plyr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Work path definition
+
+Define here your work path. It require the Wikigamificator output data.
+
+```{r }
+workpath <- "your/work/path"
+
+```
+
+## Loading data from Wikigamificator output data.
+It loads the csv data created by Wikigamificator and from the following sql querys from the metagame mysql database. If you charge the r dataset,  you shouldn't run this chunk.
+
+
+SELECT 'Player', 'Rank'
+UNION ALL
+SELECT email,name
+FROM players,player_ranks
+WHERE player_rank_id = player_ranks.id
+INTO OUTFILE '//var//lib//mysql-files//player_rank.csv'
+FIELDS TERMINATED BY ','
+ENCLOSED BY '|'
+LINES TERMINATED BY '\n';
+
+SELECT 'Player', "Time" ,'Badget.name', 'Badget.type','Project'
+UNION ALL
+SELECT email,issues.created_at,badges.name,badge_type,projects.name 
+FROM players,issues,badges,projects
+WHERE players.id = issues.player_id and badges.id = issues.badge_id and badges.project_id = projects.id
+INTO OUTFILE '//var//lib//mysql-files//player_medals_projects.csv'
+FIELDS TERMINATED BY ','
+ENCLOSED BY '|'
+LINES TERMINATED BY '\n';
+
+
+```{r, echo=FALSE}
+ MyData <- read.csv(file=paste(workpath,"events.csv",sep = ""), header=TRUE, sep=",", quote = "|")
+player_rank <- read.csv(file=paste(workpath,"player_rank.csv",sep = ""), header=TRUE, sep=",", quote = "|")
+ player_medals_projects <- read.csv(file=paste(workpath,"player_medals_projects.csv",sep = ""), header=TRUE, sep=",", quote = "|")
+
+```
+
+## Data clearing 
+
+Data is cleared of "Null" events.
+```{r, echo=FALSE}
+newdata<- MyData[ !is.na(MyData$Project!="Null" & MyData$Event.Type!="Null") & ( MyData$Project!="Null" & MyData$Event.Type!="Null")  , ]
+
+
+
+```
+
+## Event Distribution per Project
+
+ 
+```{r, echo=FALSE}
+#Projects
+projects<-as.data.frame(table(newdata$Project,newdata$Event.Type))
+projects<-projects[-c(17,34,51:68,85),]
+projects$Freq<-projects$Freq*100/sum(projects$Freq)
+names(projects)<-c("Categories","EventType","Distribution")
+#Set the number of pages
+projects$Categories<-unlist(lapply(projects$Categories, FUN = function(name,projects,subCategorias,pagesPerCategory){
+  paste(name,"(", length(pagesPerCategory[[which(subCategorias %in% name)]])," Pages)",sep = "")
+},projects=projects,subCategorias=subCategorias,pagesPerCategory=pagesPerCategory))
+
+bp<- ggplot(projects, aes(x=Categories, y=Distribution, fill = EventType))+xlab("Categories")+ylab("Percentage of Actions")+ggtitle("Event Distribution per Project")+geom_bar( stat = "identity")+coord_flip()+ scale_y_continuous(labels = function(x) paste0(x, "%"))+ scale_fill_manual(name="Actions Type",values=c("#e66101",  "#b2abd2","#fdb863", "#5e3c99"))
+bp
+
+```
+
+## Actions per type of players
+
+ 
+```{r, echo=FALSE}
+
+#Events per type of player
+players<-as.data.frame(table(newdata$Player))
+names(players)<-c("Player","Distribution")
+playersdist<-data.frame("Players" = c("Anonymous","Tourists","Interested" ,"Average" ,"Active" ),
+                   
+                   
+                   "Distribution" = c(players[players$Player=="Anonymous",]$Distribution, sum(players[!is.na(players$Distribution<=10) & (players$Distribution<=10) ,]$Distribution),
+                      sum(players[!is.na(players$Distribution>10 & players$Distribution<=296) & (players$Distribution>10 & players$Distribution<=296) ,]$Distribution),
+                    sum(players[!is.na(players$Distribution>296 & players$Distribution<=4924) & (players$Distribution>296 & players$Distribution<=4924) ,]$Distribution),
+                    sum(players[!is.na(players$Distribution>4924 & players$Player!="Anonymous") & (players$Distribution>4924 & players$Player!="Anonymous") ,]$Distribution))
+)
+names(playersdist)<-c("Player","Distribution")
+colors <- c( 'rgb(215,25,28)','rgb(253,174,97)','rgb(255,255,191)','rgb(171,221,164)','rgb(43,131,186)')
+marker = list(colors = colors,
+                      line = list(color = '#FFFFFF', width = 1))
+p <- plot_ly(playersdist, labels = ~Player, values = ~Distribution, type = 'pie',showlegend = TRUE,marker = list(colors = colors,
+                      line = list(color = '#FFFFFF', width = 1))) %>%
+  layout(title = 'Actions per type of players',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),showlegend = TRUE)
+p
+
+```
+
+## Players Type per level of activity 
+
+ 
+```{r, echo=FALSE}
+
+#Type of player
+players<-as.data.frame(table(newdata$Player))
+names(players)<-c("Player","Distribution")
+playersdist<-data.frame("Players" = c("Tourists","Interested" ,"Average" ,"Active" ),
+                   
+                   
+                   "Distribution" = c (dim(players[!is.na(players$Distribution<=10) & (players$Distribution<=10) ,])[1],
+                      dim(players[!is.na(players$Distribution>10 & players$Distribution<=296) & (players$Distribution>10 & players$Distribution<=296) ,])[1],
+                    dim(players[!is.na(players$Distribution>296 & players$Distribution<=4924) & (players$Distribution>296 & players$Distribution<=4924) ,])[1],
+                    dim(players[!is.na(players$Distribution>4924 & players$Player!="Anonymous") & (players$Distribution>4924 & players$Player!="Anonymous") ,])[1])
+)
+names(playersdist)<-c("Player","Distribution")
+colors <- c( 'rgb(253,174,97)','rgb(255,255,191)','rgb(171,221,164)','rgb(43,131,186)')
+p <- plot_ly(playersdist, labels = ~Player, values = ~Distribution, type = 'pie',showlegend = TRUE,marker = list(colors = colors,
+                      line = list(color = '#FFFFFF', width = 1))) %>%
+  layout(title = 'Players Type per level of activity',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),showlegend = TRUE)
+p
+
+
+```
+
+## Metagame actions on the time
+
+ 
+```{r, echo=FALSE}
+#Time serie analisis
+
+timedf <- data.frame("Time"= newdata$Time  ,
+                     "contribution"=0,"reinforcement"=0,"login"=0,"dissemination"=0)
+timedf[newdata$Event.Type=="contribution",]$contribution<-1
+timedf[newdata$Event.Type=="reinforcement",]$reinforcement<-1
+timedf[newdata$Event.Type=="login",]$login<-1
+timedf[newdata$Event.Type=="dissemination",]$dissemination<-1
+timedf <- aggregate(x = timedf[c("contribution","reinforcement","login","dissemination")],
+                     FUN = sum,
+                     by = list(Time = timedf$Time))
+timedf$contribution<-cumsum(timedf$contribution)
+timedf$reinforcement<-cumsum(timedf$reinforcement)
+timedf$login<-cumsum(timedf$login)
+timedf$dissemination<-cumsum(timedf$dissemination)
+timedf$Time=anytime(timedf$Time)
+
+colors <- c( 'rgb(230,97,1)','rgb(178,171,210)','rgb(253,184,99)','rgb(94,60,153)')
+p <- plot_ly(x = ~timedf$Time, y = ~timedf$contribution, mode = 'lines', name="Contribution",
+        type = "scatter", text = paste(timedf$contribution," on day ",timedf$Time),line = list(color = colors[1], width = 4))%>%
+        add_trace(y= ~timedf$reinforcement, name="Reinforcement", type = "scatter", text = paste(timedf$reinforcement," on day ",timedf$Time),line = list(color = colors[4], width = 4)) %>%
+  add_trace(y= ~timedf$login, name="Login", type = "scatter", text = paste(timedf$login," on day ",timedf$Time),line = list(color = colors[3], width = 4)) %>%
+  add_trace(y= ~timedf$dissemination, name="Dissemination", type = "scatter", text = paste(timedf$dissemination," on day ",timedf$Time),line = list(color = colors[2], width = 4))%>%
+  layout(title = 'Metagame actions on the time',yaxis = list(title = "Number of Actions"),xaxis = list(title = "Time"))
+p
+
+
+```
+
+## Ranks Distribution per Projects
+
+ 
+```{r, echo=FALSE}
+
+#ranks per projects
+
+rankperprojects<- full_join(newdata,player_rank,"Player")
+#Projects
+rankperprojects<-as.data.frame(table(rankperprojects$Project,rankperprojects$Rank))
+rankperprojects<-rankperprojects[-c(17,34,51),]
+rankperprojects$Freq<-rankperprojects$Freq*100/sum(rankperprojects$Freq)
+names(rankperprojects)<-c("Categories","Rank","Distribution")
+#Set the number of pages
+rankperprojects$Categories<-unlist(lapply(rankperprojects$Categories, FUN = function(name,projects,subCategorias,pagesPerCategory){
+  paste(name,"(", length(pagesPerCategory[[which(subCategorias %in% name)]])," Pages)",sep = "")
+},projects=rankperprojects,subCategorias=subCategorias,pagesPerCategory=pagesPerCategory))
+
+bp<- ggplot(rankperprojects, aes(x=Categories, y=Distribution, fill = Rank))+xlab("Categories")+ylab("Percentage of Ranks")+ggtitle("Ranks Distribution per Projects")+geom_bar( stat = "identity")+coord_flip()+ scale_y_continuous(labels = function(x) paste0(x, "%"))+ scale_fill_manual(name="Actions Type",values=c( "#ffffbf","#fc8d59","#99d594"))
+bp
+
+```
+
+## Players per Rank
+
+ 
+```{r, echo=FALSE}
+
+#Players per Rank
+ranksdist<-data.frame("Ranks" = c("Visitor","Explorer","Citizen Scientist"),
+                   "Distribution" = c(dim(player_rank[player_rank$Rank=="Visitor",])[1],
+                                      dim(player_rank[player_rank$Rank=="Explorer",])[1],
+                                      dim(player_rank[player_rank$Rank=="Citizen Scientist",])[1])
+)
+names(ranksdist)<-c("Ranks","Distribution")
+colors <- c( 'rgb(153,213,148)','rgb(252,141,89)','rgb(255,255,191)')
+p <- plot_ly(ranksdist, labels = ~Ranks, values = ~Distribution, type = 'pie',showlegend = TRUE,rotation=120, text=~Ranks,marker = list(colors = colors,
+                      line = list(color = '#FFFFFF', width = 1)))  %>%
+  layout(title = 'Players per Rank',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),showlegend = TRUE)
+p
+
+
+```
+
+## Metagame Badget on the time
+
+ 
+```{r, echo=FALSE}
+#Time serie analisis
+
+timedf <- data.frame("Time"= player_medals_projects$Time ,              "contribution"=0,"reinforcement"=0,"login"=0,"dissemination"=0)
+timedf[player_medals_projects$Badget.type=="contribution",]$contribution<-1
+timedf[player_medals_projects$Badget.type=="reinforcement",]$reinforcement<-1
+timedf[player_medals_projects$Badget.type=="login",]$login<-1
+timedf[player_medals_projects$Badget.type=="dissemination",]$dissemination<-1
+timedf <- aggregate(x = timedf[c("contribution","reinforcement","login","dissemination")],
+                     FUN = sum,
+                     by = list(Time = timedf$Time))
+timedf$contribution<-cumsum(timedf$contribution)
+timedf$reinforcement<-cumsum(timedf$reinforcement)
+timedf$login<-cumsum(timedf$login)
+timedf$dissemination<-cumsum(timedf$dissemination)
+timedf$Time=anytime(timedf$Time)
+colors <- c( 'rgb(230,97,1)','rgb(178,171,210)','rgb(253,184,99)','rgb(94,60,153)')
+p <- plot_ly(x = ~timedf$Time, y = ~timedf$contribution, mode = 'lines', name="Contribution",
+        type = "scatter", text = paste(timedf$contribution," on day ",timedf$Time),line = list(color = colors[1], width = 4))%>%
+        add_trace(y= ~timedf$reinforcement, name="Reinforcement", type = "scatter", text = paste(timedf$reinforcement," on day ",timedf$Time),line = list(color = colors[4], width = 4)) %>%
+  add_trace(y= ~timedf$login, name="Login", type = "scatter", text = paste(timedf$login," on day ",timedf$Time),line = list(color = colors[3], width = 4)) %>%
+  add_trace(y= ~timedf$dissemination, name="Dissemination", type = "scatter", text = paste(timedf$dissemination," on day ",timedf$Time),line = list(color = colors[2], width = 4)) %>%
+  layout(title = 'Metagame Badget on the time',yaxis = list(title = "Number of Badget"),xaxis = list(title = "Time"))
+p
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+

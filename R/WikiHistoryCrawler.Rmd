@@ -1,0 +1,265 @@
+---
+title: "Wiki history crawler for wikipedia.en"
+author: "Jonathan Martin"
+date: "22 de marzo de 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+install.packages("httr")
+install.packages("xml2")
+install.packages("stringr")
+install.packages("rjson")
+install.packages("sets")
+install.packages("Hmisc")
+install.packages("ggplot2")
+install.packages("scales")
+install.packages("plotly")
+install.packages("anytime")
+install.packages("lubridate")
+install.packages("dplyr")
+install.packages("plyr")
+
+library(httr)
+library(xml2)
+library(stringr)
+library(rjson)
+library(sets)
+library(Hmisc)
+library(ggplot2)
+library(scales)
+library(plotly)
+library(anytime)
+library(lubridate)
+library(dplyr)
+library(plyr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Work path definition
+
+Define here your work path. It will create a folder structure.
+
+```{r }
+workpath <- "your/work/path"
+dir.create(file.path(workpath, "Categoria"), showWarnings = FALSE)
+dir.create(file.path(paste(workpath,"Categoria",sep = ""),"talk"), showWarnings = FALSE)
+dir.create(file.path(paste(workpath,"Categoria",sep = ""),"whatlinkshere"), showWarnings = FALSE)
+
+```
+
+
+## Function Definition
+
+In this section I define some usefull fuctions.
+
+```{r }
+generateURLrequest<- function(page,offset,limit){
+  urlrequest<-paste("https://en.wikipedia.org/w/index.php?title=Special:Export&pages=",URLencode(page, reserved = TRUE),"&offset=",offset,"&limit=",limit,"&action=submit", sep = "")
+  return(urlrequest)
+}
+generateURLwhatslinkhere<- function(page,offset,limit){
+  if(is.null(offset)){
+    urlrequest<-paste("https://en.wikipedia.org/w/api.php?action=query&list=backlinks&bltitle=",URLencode(page, reserved = TRUE),"&bllimit=",limit,"&blfilterredir=redirects&format=json", sep = "")
+  }else{
+    urlrequest<-paste("https://en.wikipedia.org/w/api.php?action=query&list=backlinks&bltitle=",URLencode(page, reserved = TRUE),"&bllimit=",limit,"&blfilterredir=redirects&format=json&blcontinue=",offset, sep = "")
+  }
+  return(urlrequest)
+}
+generateURLcategorySubcats<- function(page,offset,limit){
+  if(is.null(offset)){
+    urlrequest<-paste("https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=",URLencode(page, reserved = TRUE),"&cmlimit=",limit,"&cmtype=subcat&format=json", sep = "")
+  }else{
+    urlrequest<-paste("https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=",URLencode(page, reserved = TRUE),"&cmlimit=",limit,"&cmtype=subcat&format=json&blcontinue=",offset, sep = "")
+  }
+  return(urlrequest)
+}
+generateURLcategoryPages<- function(page,offset,limit){
+  if(is.null(offset)){
+    urlrequest<-paste("https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=",URLencode(page, reserved = TRUE),"&cmlimit=",limit,"&cmtype=page&format=json", sep = "")
+  }else{
+    urlrequest<-paste("https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=",URLencode(page, reserved = TRUE),"&cmlimit=",limit,"&cmtype=page&format=json&blcontinue=",offset, sep = "")
+  }
+  return(urlrequest)
+}
+printRelation<- function(pagename, origen, savepath){
+  write(paste(paste("\"",origen,sep = ""),paste(pagename,"\"",sep = ""),sep = "\",\""),paste(savepath,"relations",".csv", sep = ""),append = TRUE)
+}
+getSubcategorys <- function(categoryName){
+  conditionContinue<-TRUE
+  continueIndex<-NULL
+  retorno<-list()
+  while(conditionContinue){
+    r <- GET(generateURLcategorySubcats(categoryName,continueIndex,500), encode = "json")
+    result<-content(r)
+    if(length(result$query$categorymembers)==0){
+      print("break")
+      break()
+    }
+    dd  <-  t(as.data.frame(matrix(unlist(result$query$categorymembers),
+                                   nrow=length(unlist(result$query$categorymembers[1])))))
+    rownames(dd)<- NULL
+    lista<-dd[,3]#Get the page names
+    lista<-as.list(lista)
+    print(lista)
+    retorno<-append(retorno,lista)
+    #Check if it is the end
+    if("continue" %in% names(result)){
+      continueIndex<- result$continue$cmcontinue
+    }else{
+      conditionContinue<-FALSE
+    }
+    
+  }
+  return(retorno)
+}
+
+getPagesnamesOfCategory <- function(categoryName){
+  conditionContinue<-TRUE
+  continueIndex<-NULL
+  retorno<-list()
+  while(conditionContinue){
+    r <- GET(generateURLcategoryPages(categoryName,continueIndex,500), encode = "json")
+    result<-content(r)
+    if(length(result$query$categorymembers)==0){
+      print("break")
+      break()
+    }
+    dd  <-  t(as.data.frame(matrix(unlist(result$query$categorymembers),
+                                   nrow=length(unlist(result$query$categorymembers[1])))))
+    rownames(dd)<- NULL
+    lista<-dd[,3]#Get the page names
+    lista<-as.list(lista)
+    print(lista)
+    retorno<-append(retorno,lista)
+    #Check if it is the end
+    if("continue" %in% names(result)){
+      continueIndex<- result$continue$cmcontinue
+    }else{
+      conditionContinue<-FALSE
+    }
+    
+  }
+  return(retorno)
+}
+
+whatslinkhere <- function(pagename, savepath){
+  conditionContinue<-TRUE
+  continueIndex<-NULL
+  while(conditionContinue){
+    r <- GET(generateURLwhatslinkhere(pagename,continueIndex,500), encode = "json")
+    result<-content(r)
+    if(length(result$query$backlinks)==0){
+      print("break")
+      break()
+    }
+    dd  <-  t(as.data.frame(matrix(unlist(result$query$backlinks),
+                                   nrow=length(unlist(result$query$backlinks[1])))))
+    rownames(dd)<- NULL
+    lista<-dd[,3]#Get the page names
+    lista<-as.list(lista)
+    #Request the history
+    lapply(lista, pageRequest, savepath=savepath)
+    lapply(lista, printRelation,origen= pagename, savepath=savepath)
+    #Check if it is the end
+    if("continue" %in% names(result)){
+      continueIndex<- result$continue$blcontinue
+    }else{
+      conditionContinue<-FALSE
+    }
+    
+  }
+  
+}
+pageRequest <- function(pagename, savepath){
+print(pagename)  
+lastTime<-""
+newTime<-"1"
+first<-TRUE
+while(lastTime!=newTime){
+  #Overwrite the file
+  print(newTime)
+  r <- POST(generateURLrequest(pagename,newTime,"50"), encode = "multipart")
+  resultado <- read_xml(content(r,type = "text"))
+  if(first){
+    archivo<-resultado
+    xml_ns_strip(archivo)
+    pagenodes<- tail(xml_find_all(archivo, ".//page"), n=1)
+    article_id <- xml_text(xml_find_first(archivo, ".//id"))
+    ns <- xml_text(xml_find_first(archivo, ".//ns"))
+  }
+  xml_ns_strip(resultado)
+  #Get new revisions
+  newrevisions <- xml_find_all(resultado, ".//revision")
+  texts <- xml_find_all(pagenodes, ".//text")
+  xml_attrs(texts) <- c("xml:space" = "preserve")
+  lastTime<-newTime
+  #Add the revisions to the last page
+  if(length(newrevisions)>0){
+    if(!first){
+     xml_add_child(pagenodes,rev(newrevisions))
+    }
+
+    newTime<-xml_text(tail(xml_find_all(resultado, ".//timestamp"), n=1))
+    }
+  first<-FALSE
+  
+  
+  
+}
+x <- "/"
+cleanpagename<-gsub(x, " ",pagename)
+  write_xml(archivo, paste(savepath,cleanpagename,".xml", sep = ""))
+  write(paste(paste("\"",pagename,sep = ""),article_id,paste(ns,"\"",sep = ""),sep = "\",\""),paste(savepath,"articles",".csv", sep = ""),append = TRUE)
+}
+
+talkpagerequest <- function(pagename, savepath){
+  pagename<- paste("Talk:", pagename, sep = "")
+  pageRequest(pagename,savepath)
+}
+
+```
+
+## Category and Pages selection
+
+Here in base to the main category defined the disjoint pages from the sub-categorys are selected.
+
+```{r, echo = FALSE}
+mainCategory<-"Category:Agriculture_by_type"
+subCategorias <- getSubcategorys(mainCategory)
+pagesPerCategory<- lapply(subCategorias, getPagesnamesOfCategory)
+pages<-unlist(pagesPerCategory)
+disjointPages=list()
+for(p in pages){
+  apariciones<-0
+  for( c in pagesPerCategory){
+    if(set_contains_element(as.set(unlist(c)),p)){apariciones<-apariciones+1}
+  }
+  if(apariciones==1){
+    disjointPages<-c(disjointPages,list(p))
+  }
+}
+for(d in disjointPages){
+  for( c in 1:length(pagesPerCategory)){
+      if(set_contains_element(as.set(unlist(pagesPerCategory[c])),d)){
+        printRelation(d,subCategorias[c],paste(workpath,"/Categoria/",sep = ""))
+        }
+  }
+}
+
+```
+## Download
+
+Here 3 types of articles are download, disjointed articles, talk pages of disjointed articles and related articles.
+
+```{r, echo = FALSE}
+listaDePaginas <- disjointPages
+
+  lapply(listaDePaginas, pageRequest, savepath=paste(workpath,"/Categoria/",sep = ""))
+  lapply(listaDePaginas, talkpagerequest,savepath=paste(workpath,"/Categoria/talk/",sep = ""))
+  lapply(listaDePaginas, whatslinkhere,savepath=paste(workpath,"/Categoria/whatlinkshere/",sep = ""))
+
+
+
+
+```
